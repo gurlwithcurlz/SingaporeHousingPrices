@@ -1,0 +1,474 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Apr  7 17:38:05 2019
+
+@author: Selina S. Solomon
+"""
+
+# This program implements the model with 'optimal' predictors, based on the 2 methods of analysis
+# # #
+# 1. Method 1: Look at each year and get the optimal # of predictors, and see which predictors show up most often
+# Method 1 predictors were flat_type, floor_area_sqm and town
+# # #
+# 2. Method 2: Combine across the years and see which model is most predictive
+# Method 2 predictors were prevmonth_price, flat_type, floor_area_sqm
+# # #
+# Ok..so they both give pretty consistent results, that's good..now let's implement model with these four predicotrs
+# prevmonth_price, flat_type, floor_area_sqm, town
+
+# Selina 7 April 2019
+
+# Program to predict future prices at different timescales
+
+# Import relevant modules
+import os
+import numpy as np
+import pandas as pd
+# Plotting
+import matplotlib.pyplot as plt
+#from mpldatacursor import datacursor
+# Model fitting
+import statsmodels.api as stats
+from sklearn import datasets, linear_model
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.linear_model import LinearRegression, Ridge, RidgeCV, LassoCV, Lasso
+from sklearn.model_selection import train_test_split
+
+
+# Set directories, filenames and url api
+curr_dir = os.getcwd()
+dataFolder=os.path.join(curr_dir) 
+    # This is where I saved the individual .csv files
+inputFileName='All_Resale_FlatPrices_Processed.csv'
+input_file=os.path.join(dataFolder,inputFileName)
+
+all_predictors=np.array(['prevmonth_price','floor_area_sqm','flat_type','town' ])
+categorical_predictors=np.array(['flat_type','town'])
+quantitative_predictors=np.array(['prevmonth_price','floor_area_sqm'])
+
+# Read in data
+data=pd.read_csv(input_file)
+# Set up parameters for model fitting
+alpha_vals=[0.001,0.01,0.1,1,2,4,8,10,15,20,50] #
+
+# First do for 1 year and 5 year timescale
+unique_1year=data.resale_year.unique()
+unique_1year.sort() # Sort data
+
+forecastR2_1year=[]
+for count,value in enumerate(unique_1year):
+    if count==(len(unique_1year)-1): # Last year, no forecast
+        continue
+    
+    print('Forecasting for 1 year ahead, year',value)
+    # Training data
+    idx=data.loc[:,'resale_year']==value
+    x_cat=pd.get_dummies(data.loc[:,categorical_predictors])
+        # Note, not all categories will be present for forecasting, so should index after getting dummies
+    x_cat=x_cat.loc[idx,:]
+    x_quant=data.loc[idx,quantitative_predictors]
+    X=pd.concat([x_cat,x_quant],axis=1)
+    X=X.fillna(X.mean())
+    y=data.loc[idx,'resale_price']
+    
+    
+    # Forecast data
+    forecast_year=unique_1year[count+1]
+    idy=data.loc[:,'resale_year']==forecast_year
+    x_catFuture=pd.get_dummies(data.loc[:,categorical_predictors])
+    x_catFuture=x_catFuture.loc[idy,:]
+    x_quantFuture=data.loc[idy,quantitative_predictors]
+    X_Future=pd.concat([x_catFuture,x_quantFuture],axis=1)
+    X_Future=X_Future.fillna(X_Future.mean())
+    y_Future=data.loc[idy,'resale_price']
+    
+   
+
+    # We will split our data into 2 groups only
+    # 1. Training set and validation set
+    # Split into 80:20
+    X_train, X_validate, y_train, y_validate = train_test_split(X, y, test_size=0.2)
+    # Since our cross-validation will be on the future/forecast
+
+    # Choose best alpha ...
+    ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+    # Now train on validating data and get the appropriate alpha
+    ridgeCV_model.fit(X_validate, y_validate)
+    # Ok, now fit the model on training data with the selected alpha
+    #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+    simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+    
+    simpleLM.fit(X_train,y_train)                  
+
+    # Now evaluate forecast
+    temp_r2=simpleLM.score(X_Future, y_Future)
+    forecastR2_1year.append(temp_r2)
+    
+
+# Plot example scatter plot (latest)
+plt.figure(figsize=(8,8))
+y_pred=simpleLM.predict(X_Future)
+# Scatter plot\
+ax=plt.subplot()
+plt.plot(y_Future,y_pred,'.',color='indigo',alpha=0.5)
+plt.axis([-150000,1200000,-150000,1200000])
+xl=plt.xlim();
+plt.plot(xl,xl,'--k')
+plt.title('1 year ahead prediction')
+plt.ylabel('Predicted price ($)')
+plt.xlabel('Actual price ($)')
+plt.ylabel('Predicted price ($)',fontsize=20)
+plt.xlabel('Actual price ($)',fontsize=20)
+plt.xticks([0,600000,1200000],fontsize=15)
+plt.yticks([0,600000,1200000],fontsize=15)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,1200000)
+ax.spines['bottom'].set_bounds(0,1200000)
+plt.gcf().subplots_adjust(bottom=0.2,left=0.2)
+plt.axis('square')
+plt.show()
+
+# Forecast 5 years
+unique_5years=[1995,2000,2005,2010,2015]
+forecastR2_5years=[]
+for count,value in enumerate(unique_5years):
+
+    print('Forecasting for 5 years ahead, year',value)
+    # Training data
+    idx=(data.loc[:,'resale_year']<value) & (data.loc[:,'resale_year']>=(value-5))
+    x_cat=pd.get_dummies(data.loc[:,categorical_predictors])
+        # Note, not all categories will be present for forecasting, so should index after getting dummies
+    x_cat=x_cat.loc[idx,:]
+    x_quant=data.loc[idx,quantitative_predictors]
+    X=pd.concat([x_cat,x_quant],axis=1)
+    X=X.fillna(X.mean())
+    y=data.loc[idx,'resale_price']
+    
+    
+    # Forecast data
+    idy=(data.loc[:,'resale_year']<value+5) & (data.loc[:,'resale_year']>=(value))
+    x_catFuture=pd.get_dummies(data.loc[:,categorical_predictors])
+    x_catFuture=x_catFuture.loc[idy,:]
+    x_quantFuture=data.loc[idy,quantitative_predictors]
+    X_Future=pd.concat([x_catFuture,x_quantFuture],axis=1)
+    X_Future=X_Future.fillna(X_Future.mean())
+    y_Future=data.loc[idy,'resale_price']
+    
+   
+
+    # We will split our data into 2 groups only
+    # 1. Training set and validation set
+    # Split into 80:20
+    X_train, X_validate, y_train, y_validate = train_test_split(X, y, test_size=0.2)
+    # Since our cross-validation will be on the future/forecast
+
+    # Choose best alpha ...
+    ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+    # Now train on validating data and get the appropriate alpha
+    ridgeCV_model.fit(X_validate, y_validate)
+    # Ok, now fit the model on training data with the selected alpha
+    #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+    simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+    
+    simpleLM.fit(X_train,y_train)                  
+
+    # Now evaluate forecast
+    temp_r2=simpleLM.score(X_Future, y_Future)
+    forecastR2_5years.append(temp_r2)
+    
+    
+
+# Update scatter plot 
+plt.figure(figsize=(8,8))
+# Add to scatter plot
+y_pred=simpleLM.predict(X_Future)
+# Scatter plot\
+ax=plt.subplot()
+plt.plot(y_Future,y_pred,'.',color='indigo',alpha=0.5)
+plt.show()
+plt.axis([-150000,1200000,-150000,1200000])
+xl=plt.xlim();
+plt.plot(xl,xl,'--k')
+plt.title('5 years ahead prediction')
+plt.ylabel('Predicted price ($)')
+plt.xlabel('Actual price ($)')
+plt.ylabel('Predicted price ($)',fontsize=20)
+plt.xlabel('Actual price ($)',fontsize=20)
+plt.xticks([0,600000,1200000],fontsize=15)
+plt.yticks([0,600000,1200000],fontsize=15)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,1200000)
+ax.spines['bottom'].set_bounds(0,1200000)
+plt.gcf().subplots_adjust(bottom=0.2,left=0.2)
+plt.axis('square')
+plt.show()
+
+# Forecast 6 months
+forecastR2_6months=[]
+unique_6months=[6,12]
+for countyear,valueyear in enumerate(unique_1year):
+    for countmonth,valuemonth in enumerate(unique_6months):
+        if (valueyear==unique_1year[-1]) & (valuemonth==12): # No forecasting
+            continue
+        
+        print('Forecasting for 6 months ahead, year',valueyear,'month',valuemonth)
+        
+        if valuemonth==6: # Forecast in same year
+            idx=(data.loc[:,'resale_year']==valueyear) & (data.loc[:,'resale_month']<=valuemonth)
+            idy=(data.loc[:,'resale_year']==valueyear) & (data.loc[:,'resale_month']<=12) & (data.loc[:,'resale_month']>6)
+        else: # Forecast in next year
+            idx=(data.loc[:,'resale_year']==valueyear) & (data.loc[:,'resale_month']<=valuemonth) & (data.loc[:,'resale_month']>6)
+            idy=(data.loc[:,'resale_year']==(valueyear+1)) & (data.loc[:,'resale_month']<=6)
+            
+            
+        # Training data
+        x_cat=pd.get_dummies(data.loc[:,categorical_predictors])
+            # Note, not all categories will be present for forecasting, so should index after getting dummies
+        x_cat=x_cat.loc[idx,:]
+        x_quant=data.loc[idx,quantitative_predictors]
+        X=pd.concat([x_cat,x_quant],axis=1)
+        X=X.fillna(X.mean())
+        y=data.loc[idx,'resale_price']
+        
+        
+        # Forecast data
+        x_catFuture=pd.get_dummies(data.loc[:,categorical_predictors])
+        x_catFuture=x_catFuture.loc[idy,:]
+        x_quantFuture=data.loc[idy,quantitative_predictors]
+        X_Future=pd.concat([x_catFuture,x_quantFuture],axis=1)
+        X_Future=X_Future.fillna(X_Future.mean())
+        y_Future=data.loc[idy,'resale_price']
+        
+       
+    
+        # We will split our data into 2 groups only
+        # 1. Training set and validation set
+        # Split into 80:20
+        X_train, X_validate, y_train, y_validate = train_test_split(X, y, test_size=0.2)
+        # Since our cross-validation will be on the future/forecast
+    
+        # Choose best alpha ...
+        ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+        # Now train on validating data and get the appropriate alpha
+        ridgeCV_model.fit(X_validate, y_validate)
+        # Ok, now fit the model on training data with the selected alpha
+        #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+        simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+        
+        simpleLM.fit(X_train,y_train)                  
+    
+        # Now evaluate forecast
+        temp_r2=simpleLM.score(X_Future, y_Future)
+        forecastR2_6months.append(temp_r2)
+        
+        
+
+# Update scatter plot 
+plt.figure(figsize=(8,8))# Add to scatter plot
+y_pred=simpleLM.predict(X_Future)
+# Scatter plot\
+ax=plt.subplot()
+plt.plot(y_Future,y_pred,'.',color='indigo',alpha=0.5)
+plt.axis([-150000,1200000,-150000,1200000])
+xl=plt.xlim();
+plt.plot(xl,xl,'--k')
+plt.title('6 months ahead prediction')
+plt.ylabel('Predicted price ($)')
+plt.xlabel('Actual price ($)')
+plt.ylabel('Predicted price ($)',fontsize=20)
+plt.xlabel('Actual price ($)',fontsize=20)
+plt.xticks([0,600000,1200000],fontsize=15)
+plt.yticks([0,600000,1200000],fontsize=15)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,1200000)
+ax.spines['bottom'].set_bounds(0,1200000)
+plt.gcf().subplots_adjust(bottom=0.2,left=0.2)
+plt.axis('square')
+plt.show()
+
+        
+# Forecast for 1 month ahead
+forecastR2_1month=[]
+unique_1month=range(1,12)
+for countyear,valueyear in enumerate(unique_1year):
+    for countmonth,valuemonth in enumerate(unique_1month):
+        if (valueyear==unique_1year[-1]) & (valuemonth==12): # No forecasting
+            continue
+        
+        if (valueyear==unique_1year[0]) & (valuemonth==1): # No price from last month
+            continue
+        
+        print('Forecasting for 1 month ahead, year',valueyear,'month',valuemonth)
+        
+        if valuemonth<12: # Forecast in same year
+            idx=(data.loc[:,'resale_year']==valueyear) & (data.loc[:,'resale_month']==valuemonth)
+            idy=(data.loc[:,'resale_year']==valueyear) & (data.loc[:,'resale_month']==(valuemonth+1))
+        if valuemonth==12: # Forecast in next year
+            idx=(data.loc[:,'resale_year']==valueyear) & (data.loc[:,'resale_month']==valuemonth)
+            idy=(data.loc[:,'resale_year']==(valueyear+1)) & (data.loc[:,'resale_month']==1)
+            
+            
+        # Training data
+        x_cat=pd.get_dummies(data.loc[:,categorical_predictors])
+            # Note, not all categories will be present for forecasting, so should index after getting dummies
+        x_cat=x_cat.loc[idx,:]
+        x_quant=data.loc[idx,quantitative_predictors]
+        X=pd.concat([x_cat,x_quant],axis=1)
+        X=X.fillna(X.mean())
+        y=data.loc[idx,'resale_price']
+        
+        
+        # Forecast data
+        x_catFuture=pd.get_dummies(data.loc[:,categorical_predictors])
+        x_catFuture=x_catFuture.loc[idy,:]
+        x_quantFuture=data.loc[idy,quantitative_predictors]
+        X_Future=pd.concat([x_catFuture,x_quantFuture],axis=1)
+        X_Future=X_Future.fillna(X_Future.mean())
+        y_Future=data.loc[idy,'resale_price']
+        
+       
+    
+        # We will split our data into 2 groups only
+        # 1. Training set and validation set
+        # Split into 80:20
+        X_train, X_validate, y_train, y_validate = train_test_split(X, y, test_size=0.2)
+        # Since our cross-validation will be on the future/forecast
+    
+        # Choose best alpha ...
+        ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+        # Now train on validating data and get the appropriate alpha
+        ridgeCV_model.fit(X_validate, y_validate)
+        # Ok, now fit the model on training data with the selected alpha
+        #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+        simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+        
+        simpleLM.fit(X_train,y_train)                  
+    
+        # Now evaluate forecast
+        temp_r2=simpleLM.score(X_Future, y_Future)
+        forecastR2_1month.append(temp_r2)
+
+        # Add to scatter plot
+        y_pred=simpleLM.predict(X_Future)
+       
+        
+# Update scatter plot 
+plt.figure(figsize=(8,8))
+ # Scatter plot\
+ax=plt.subplot()
+plt.plot(y_Future,y_pred,'.',color='indigo',alpha=0.5)
+plt.axis([-150000,1200000,-150000,1200000])
+xl=plt.xlim();
+plt.plot(xl,xl,'--k')
+plt.title('1 month ahead prediction')
+plt.ylabel('Predicted price ($)')
+plt.xlabel('Actual price ($)')
+plt.ylabel('Predicted price ($)',fontsize=20)
+plt.xlabel('Actual price ($)',fontsize=20)
+plt.xticks([0,600000,1200000],fontsize=15)
+plt.yticks([0,600000,1200000],fontsize=15)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,1200000)
+ax.spines['bottom'].set_bounds(0,1200000)
+plt.gcf().subplots_adjust(bottom=0.2,left=0.2)
+plt.axis('square')
+plt.show()
+
+# Finally, forecast for 1 month (present)
+presentR2_1month=[]
+unique_1month=range(1,12)
+for countyear,valueyear in enumerate(unique_1year):
+    for countmonth,valuemonth in enumerate(unique_1month):
+        if (valueyear==unique_1year[0]) & (valuemonth==unique_1month[0]): # No past price
+            continue
+        
+        print('Forecasting for 1 month present, year',valueyear,'month',valuemonth)
+        
+        idx=(data.loc[:,'resale_year']==valueyear) & (data.loc[:,'resale_month']==valuemonth)
+            
+            
+        # Training data
+        x_cat=pd.get_dummies(data.loc[:,categorical_predictors])
+            # Note, not all categories will be present for forecasting, so should index after getting dummies
+        x_cat=x_cat.loc[idx,:]
+        x_quant=data.loc[idx,quantitative_predictors]
+        X=pd.concat([x_cat,x_quant],axis=1)
+        X=X.fillna(X.mean())
+        y=data.loc[idx,'resale_price']
+        
+        # We will split our data into 3 groups:
+        # 1. Training set, validation set (to select best parameters of model), & testing set
+        # Split into 60:20:20
+        X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+            # We have training set
+        X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+        
+        # Choose best alpha ...
+        ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+        ridgeCV_model.fit(X_validate, y_validate)
+        # Ok, now fit the model on training data with the selected alpha
+        #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+        simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+        simpleLM.fit(X_train,y_train)                  
+        
+        # Now evaluate forecast
+        temp_r2=simpleLM.score(X_xtest, y_xtest)
+        presentR2_1month.append(temp_r2)
+
+        
+# Test model
+present_R2=simpleLM.score(X_xtest,y_xtest)
+y_pred=simpleLM.predict(X_xtest)
+# Scatter plot
+plt.figure(figsize=(8,8))
+ax=plt.subplot()
+plt.plot(y_xtest,y_pred,'.',color='indigo',alpha=0.5)
+plt.axis([-150000,1200000,-150000,1200000])
+xl=plt.xlim();
+plt.plot([0,1200000],[0,1200000],'--k')
+plt.title('Present day prediction')
+plt.ylabel('Predicted price ($)',fontsize=20)
+plt.xlabel('Actual price ($)',fontsize=20)
+plt.xticks([0,600000,1200000],fontsize=15)
+plt.yticks([0,600000,1200000],fontsize=15)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,1200000)
+ax.spines['bottom'].set_bounds(0,1200000)
+plt.gcf().subplots_adjust(bottom=0.2,left=0.2)
+plt.axis('square')
+plt.show()
+
+
+# Now do bar plot
+all_forecastR2=[forecastR2_1month,forecastR2_6months,forecastR2_1year,forecastR2_5years]
+all_forecastR2mean=[np.mean(i) for i in all_forecastR2]
+all_forecastR2SD=[np.std(i) for i in all_forecastR2]
+
+# Get present
+present_R2mean=np.mean(presentR2_1month)
+present_R2SD=np.std(presentR2_1month)
+
+plt.figure(figsize=(6,6))
+xval=['1 month','6 months','1 year','5 years']
+ax=plt.subplot()
+plt.bar('Present',present_R2mean,color='indigo')
+plt.errorbar(['Present'],present_R2mean,yerr=present_R2SD,ecolor='black',capsize=0,linestyle='')
+plt.bar(xval,all_forecastR2mean,color='blueviolet')
+plt.errorbar(xval,all_forecastR2mean,yerr=all_forecastR2SD,ecolor='black',capsize=0,linestyle='')
+plt.ylim([0,1])
+plt.yticks(fontsize=15)
+plt.xticks(fontsize=15,rotation=90)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,1)
+plt.gcf().subplots_adjust(bottom=0.4,left=0.2) # To make sure you can read labels 
+#plt.title('Predictive power of forecasts')
+plt.ylabel('Predictive power (R2)',fontsize=20)
+plt.gcf().subplots_adjust(bottom=0.4,left=0.2)
+plt.show()

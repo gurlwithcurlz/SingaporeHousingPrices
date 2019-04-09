@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Apr  7 17:38:05 2019
+
+@author: Selina S. Solomon
+"""
+
+# This program implements the model with 'optimal' predictors, based on the 2 methods of analysis
+# # #
+# 1. Method 1: Look at each year and get the optimal # of predictors, and see which predictors show up most often
+# Method 1 predictors were flat_type, floor_area_sqm and town
+# # #
+# 2. Method 2: Combine across the years and see which model is most predictive
+# Method 2 predictors were prevmonth_price, flat_type, floor_area_sqm
+# # #
+# Ok..so they both give pretty consistent results, that's good..now let's implement model with these four predicotrs
+# prevmonth_price, flat_type, floor_area_sqm, town
+
+# Selina 7 April 2019
+
+# Program to choose the optimal # of predictors to predict HDB resale prices
+
+# Import relevant modules
+import os
+import numpy as np
+import pandas as pd
+# Plotting
+import matplotlib.pyplot as plt
+#from mpldatacursor import datacursor
+# Model fitting
+import statsmodels.api as stats
+from sklearn import datasets, linear_model
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.linear_model import LinearRegression, Ridge, RidgeCV, LassoCV, Lasso
+from sklearn.model_selection import train_test_split
+
+
+# Set directories, filenames and url api
+curr_dir = os.getcwd()
+dataFolder=os.path.join(curr_dir) 
+    # This is where I saved the individual .csv files
+inputFileName='All_Resale_FlatPrices_Processed.csv'
+input_file=os.path.join(dataFolder,inputFileName)
+
+# Read in data
+data=pd.read_csv(input_file)
+# Get resale price
+y=data.loc[:,'resale_price']
+# Get predictors
+all_predictors=np.array(['prevmonth_price','floor_area_sqm','flat_type','town' ])
+categorical_predictors=np.array(['flat_type','town'])
+quantitative_predictors=np.array(['prevmonth_price','floor_area_sqm'])
+
+x1=data.loc[:,'prevmonth_price']
+x2=data.loc[:,'floor_area_sqm']
+x3=pd.get_dummies(data.loc[:,'flat_type'])
+x4=pd.get_dummies(data.loc[:,'town'])
+
+X=pd.concat([x1,x2,x3,x4],axis=1)
+X=X.fillna(X.mean()) # Fill missing values
+
+# Set up parameters for model fitting
+alpha_vals=[0.001,0.01,0.1,1,2,4,8,10,15,20,50] #
+# We will split our data into 3 groups:
+# 1. Training set, validation set (to select best parameters of model), & testing set
+# Split into 60:20:20
+X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+    # We have training set
+X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+
+# Ok, set up parameters for model selection
+#alpha_vals=np.linspace(0.0001,10,500)
+# Choose best alpha ...
+ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+# Now train on validating data and get the appropriate alpha
+ridgeCV_model.fit(X_validate, y_validate)
+# Ok, now fit the model on training data with the selected alpha
+#simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+
+simpleLM.fit(X_train,y_train)                  
+
+# Now cross-validate
+unique_town=data.town.unique()
+unique_flat_type=data.flat_type.unique()
+fullmodel_R2=simpleLM.score(X_xtest, y_xtest)
+
+# Let's see how much each variable contributes
+ordered_predictors=[] # Keep track of which predictors are most important
+ordered_deltaR2=[]
+
+temp_R2=[]
+temp_predictors=[]
+
+for count,value in enumerate(all_predictors):
+    
+    #all_other_predictors=np.delete(leftover_predictors,np.where(leftover_predictors==value))
+    if value in categorical_predictors:
+        all_other_categorical_predictors=np.delete(categorical_predictors,np.where(categorical_predictors==value))
+        all_other_quantitative_predictors=quantitative_predictors
+    else:
+        all_other_categorical_predictors=categorical_predictors
+        all_other_quantitative_predictors=np.delete(quantitative_predictors,np.where(quantitative_predictors==value))
+        
+    # Predict with all other variables
+    x_cat=pd.get_dummies(data.loc[:,all_other_categorical_predictors])
+    x_quant=data.loc[:,all_other_quantitative_predictors]
+    X=pd.concat([x_quant,x_cat],axis=1)
+    X=X.fillna(X.mean())
+    
+    # We will split our data into 3 groups:
+    # 1. Training set, validation set (to select best parameters of model), & testing set
+    # Split into 60:20:20
+    X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+        # We have training set
+    X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+
+    # Choose best alpha ...
+    ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+    # Now train on validating data and get the appropriate alpha
+    ridgeCV_model.fit(X_validate, y_validate)
+    # Ok, now fit the model on training data with the selected alpha
+    #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+    simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+    
+    simpleLM.fit(X_train,y_train)     
+    r2=simpleLM.score(X_xtest,y_xtest)      
+    delta_R2=fullmodel_R2-r2
+    temp_R2.append(delta_R2)
+    temp_predictors.append(value)
+
+# Ok, let's work out which affected the full model most
+sorti=np.argsort(temp_R2)
+reverse_sort=list(reversed(sorti))
+temp_predictors=np.array(temp_predictors)
+temp_R2=np.array(temp_R2)
+ordered_predictors=temp_predictors[reverse_sort]
+ordered_deltaR2=temp_R2[reverse_sort]
+
+    
+
+
+# Do a prediction as a function of time
+unique_resaleyear=data.resale_year.unique()
+unique_resaleyear.sort()
+
+R2_by_year=[]
+ordered_deltaR2_by_year=[]
+ordered_predictors_by_year=[]
+
+for count,value in enumerate(unique_resaleyear):
+    print('Calculating explained variance for year',value)
+    idx=data.loc[:,'resale_year']==value
+    y=data.loc[idx,'resale_price']
+    
+    x1=data.loc[idx,'prevmonth_price']
+    x2=data.loc[idx,'floor_area_sqm']
+    x3=pd.get_dummies(data.loc[idx,'flat_type'])
+    x4=pd.get_dummies(data.loc[idx,'town'])
+    
+    X=pd.concat([x1,x2,x3,x4],axis=1)
+    X=X.fillna(X.mean()) # Fill missing values
+
+    # Split into 60:20:20
+    X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+        # We have training set
+    X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+    
+    # Choose best alpha ...
+    ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+    # Now train on validating data and get the appropriate alpha
+    ridgeCV_model.fit(X_validate, y_validate)
+    # Ok, now fit the model on training data with the selected alpha
+    simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+
+    # # This code if you wanted to use lasso instead..gave similar results, which was expected
+    # lassoCV_model=LassoCV(alphas=alpha_vals,fit_intercept=True)
+    # lassoCV_model.fit(X_validate,y_validate)
+    # simpleLM=Lasso(alpha=lassoCV_model.alpha_, fit_intercept=True, max_iter=10000);
+    
+    simpleLM.fit(X_train,y_train)                  
+
+    # Now cross-validate
+    temp_full_r2=simpleLM.score(X_xtest, y_xtest)
+    R2_by_year.append(temp_full_r2)
+    
+    temp_R2=[]
+    temp_predictors=[]
+    for count,value in enumerate(all_predictors):
+        
+        #all_other_predictors=np.delete(leftover_predictors,np.where(leftover_predictors==value))
+        if value in categorical_predictors:
+            all_other_categorical_predictors=np.delete(categorical_predictors,np.where(categorical_predictors==value))
+            all_other_quantitative_predictors=quantitative_predictors
+        else:
+            all_other_categorical_predictors=categorical_predictors
+            all_other_quantitative_predictors=np.delete(quantitative_predictors,np.where(quantitative_predictors==value))
+            
+        # Predict with all other variables
+        x_cat=pd.get_dummies(data.loc[idx,all_other_categorical_predictors])
+        x_quant=data.loc[idx,all_other_quantitative_predictors]
+        X=pd.concat([x_quant,x_cat],axis=1)
+        X=X.fillna(X.mean())
+        
+        # We will split our data into 3 groups:
+        # 1. Training set, validation set (to select best parameters of model), & testing set
+        # Split into 60:20:20
+        X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+            # We have training set
+        X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+    
+        # Choose best alpha ...
+        ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+        # Now train on validating data and get the appropriate alpha
+        ridgeCV_model.fit(X_validate, y_validate)
+        # Ok, now fit the model on training data with the selected alpha
+        #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+        simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+        
+        simpleLM.fit(X_train,y_train)     
+        r2=simpleLM.score(X_xtest,y_xtest)      
+        delta_R2=temp_full_r2-r2
+        temp_R2.append(delta_R2)
+        temp_predictors.append(value)
+
+    # Ok, let's work out which affected the full model most
+    sorti=np.argsort(temp_R2)
+    reverse_sort=list(reversed(sorti))
+    temp_predictors=np.array(temp_predictors)
+    temp_R2=np.array(temp_R2)
+    ordered_predictors_by_year.append(temp_predictors[reverse_sort])
+    ordered_deltaR2_by_year.append(temp_R2[reverse_sort])
+
+
+# Plot results
+plt.figure(figsize=(12,6))
+ax=plt.subplot()
+plt.plot(unique_resaleyear,R2_by_year,color='indigo')
+plt.plot(unique_resaleyear,ordered_deltaR2_by_year)
+plt.ylim([0,1])
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,1)
+plt.gcf().subplots_adjust(bottom=0.4) # To make sure you can read labels 
+plt.title('Explainable variance')
+plt.show()

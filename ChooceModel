@@ -1,0 +1,419 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Apr  2 20:07:05 2019
+
+@author: Selina S. Solomon
+"""
+
+# Selina 2 April 2019
+
+# Program to predict resale of housing prices in Singapore
+# For Holmusk assessment
+
+# Import relevant modules
+import os
+import numpy as np
+import pandas as pd
+# Plotting
+import matplotlib.pyplot as plt
+#from mpldatacursor import datacursor
+# Model fitting
+import statsmodels.api as stats
+from sklearn import datasets, linear_model
+from sklearn.metrics import mean_squared_error, r2_score
+
+
+
+# Set directories, filenames and url api
+curr_dir = os.getcwd()
+dataFolder=os.path.join(curr_dir) 
+    # This is where I saved the individual .csv files
+inputFileName='All_Resale_FlatPrices_Processed.csv'
+#cpiFileName='CPI.csv'
+    # This is my filename with merged data and geodata
+input_file=os.path.join(dataFolder,inputFileName)
+
+# Read in data
+data=pd.read_csv(input_file)
+
+# Ok, now let's see which are the best predictors!
+quantitative_predictors=['floor_area_sqm','lease_commence_date','flatType_ordinal',
+                         'storeys_ordinal','prevyear_price','prevmonth_price','distance_from_CentralArea',\
+                         'distanceOverfloor_area','distanceOverlease_commence_date','resale_year','CPI','n_houses_for_sale']
+categorical_predictors=['flat_model','flat_type','town','storey_range'] 
+        
+
+
+
+### Comment this out if you want to look at all resale years
+#idx=data[data['resale_year']<=2000].index
+#data=data.drop(index=idx)
+
+# Now, let's do linear regression and see which are the best predictors
+## Linear regression
+from sklearn.linear_model import LinearRegression, Ridge, RidgeCV, LassoCV, Lasso
+from sklearn.model_selection import train_test_split
+#import math
+
+y_raw=data.resale_price
+quantitative_R2=[]
+alpha_vals=[0.001,0.01,0.1,1,2,4,8,10,15,20,50] #
+for count, value in enumerate(quantitative_predictors):
+    X=data.loc[:,value]
+    X=X.fillna(X.mean())
+    X=np.array(X)
+    X.reshape(-1,1)
+    y=y_raw
+#    # Remove missing vals
+#    y=y_raw[~np.isnan(X)]
+#    X=X[~np.isnan(X)]
+    # We will split our data into 3 groups:
+    # 1. Training set, validation set (to select best parameters of model), & testing set
+    # Split into 60:20:20
+    X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+        # We have training set
+    X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+    
+    # Ok, set up parameters for model selection
+    #alpha_vals=np.linspace(0.0001,10,500)
+    # Choose best alpha ...
+    ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+    # Now train on validating data and get the appropriate alpha
+    ridgeCV_model.fit(X_validate.reshape(-1,1), y_validate)
+    # Ok, now fit the model on training data with the selected alpha
+    #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+    simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+
+    # # This code if you wanted to use lasso instead..gave similar results, which was expected
+    # lassoCV_model=LassoCV(alphas=alpha_vals,fit_intercept=True)
+    # lassoCV_model.fit(X_validate,y_validate)
+    # simpleLM=Lasso(alpha=lassoCV_model.alpha_, fit_intercept=True, max_iter=10000);
+    
+    simpleLM.fit(X_train.reshape(-1,1),y_train)                  
+
+    # Now cross-validate
+    #y_pred = simpleLM.predict(X_xtest.reshape(-1,1))
+    #lm_mse=mean_squared_error(y_pred,y_xtest)
+    temp_r2=simpleLM.score(X_xtest.reshape(-1,1), y_xtest)
+    print('\nPredictor: ',value)
+    print('\nR squared: %.4f' % temp_r2)
+    # Save data
+    quantitative_R2.append(temp_r2)
+    
+# Do similar analysis for categorical predictors
+
+y_raw=data.resale_price
+categorical_R2=[]
+# Ok, set up parameters for model selection
+    
+for count, value in enumerate(categorical_predictors):
+    #xtemp=data.loc[:,value];
+    #y=y_raw[~np.isnan(xtemp)]
+    #xtemp=xtemp[~np.isnan(xtemp)]
+    
+    X=pd.get_dummies(data.loc[:,value]) # Use dummy variables
+    y=y_raw
+    #X=np.array(X)
+    #X.reshape(-1,1)
+    # Remove missing vals
+    # We will split our data into 3 groups:
+    # 1. Training set, validation set (to select best parameters of model), & testing set
+    # Split into 60:20:20
+    X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+        # We have training set
+    X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+    
+    # Choose best alpha ...
+    ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+    # Now train on validating data and get the appropriate alpha
+    ridgeCV_model.fit(X_validate, y_validate)
+    # Ok, now fit the model on training data with the selected alpha
+    simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+
+    # # This code if you wanted to use lasso instead..gave similar results, which was expected
+    # lassoCV_model=LassoCV(alphas=alpha_vals,fit_intercept=True)
+    # lassoCV_model.fit(X_validate,y_validate)
+    # simpleLM=Lasso(alpha=lassoCV_model.alpha_, fit_intercept=True, max_iter=10000);
+    
+    simpleLM.fit(X_train,y_train)                  
+
+    # Now cross-validate
+    temp_r2=simpleLM.score(X_xtest, y_xtest)
+    print('\nPredictor: ',value)
+    print('\nR squared: %.4f' % temp_r2)
+    # Save data
+    categorical_R2.append(temp_r2)
+    
+# Plot results of analysis
+all_predictors=np.array(quantitative_predictors+categorical_predictors)
+all_R2=np.array(quantitative_R2+categorical_R2)
+plotname=['short-term price history','flat type','CPI','flat type ordinal','size','long-term price history','year of sale',\
+          'flat model','flat age','adjusted distance to city','town','flat storey','flat storey ordinal','market supply',\
+          'adjusted distance to city (age)','distance to city']
+# Sort in ascending order
+sorti=np.argsort(all_R2)
+reverse_sort=list(reversed(sorti))
+# Reverse order
+plt.figure(figsize=(12,10))
+ax=plt.subplot()
+plt.bar(plotname,all_R2[reverse_sort],color='indigo') # For plotting for presentation
+#plt.bar(all_predictors[reverse_sort],all_R2[reverse_sort],color='indigo')
+plt.xticks(rotation=90,fontsize=16)
+plt.yticks(fontsize=16)
+plt.ylim([0,0.5])
+plt.ylabel('Predictive power (R2)',fontsize=20)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,0.5)
+plt.gcf().subplots_adjust(bottom=0.5,left=0.2) # To make sure you can read labels 
+
+# Ok... so the predictors (in descending order of predictive power) are
+#['prevmonth_price', 'flat_type', 'prevyear_price',
+#       'flatType_ordinal', 'resale_year', 'floor_area_sqm', 'flat_model',
+#       'lease_commence_date', 'distanceOverfloor_area', 'town',
+#       'storey_range', 'storeys_ordinal', 'distance_from_CentralArea',
+#       'distanceOverlease_commence_date']
+    
+#Ok, so let's take a look at how much each predictor is correlated with another
+cmatrix=data.corr(method='pearson')
+
+# Best predictor is the prevmonth_price
+# Previous month and previous year price are strongly correlated (r=0.95)
+# Not surprising..one is a more local measure of the housing market...
+# It is also very correlated with with the year (duh..), r=0.87, although resale_year is not as strongly predictive
+# prevmonth_price is also somewhat correlated with lease_commence_date (r=0.29)
+# All these analyses seem expected
+
+# Second best predictor is flat type, which is strongly correlated with floor_area_sqm (r=0.93)
+# Also quite correlated with lease_commence_date (r=0.46), and to some extend distance (r=0.27)
+
+# Similar to prevmonth_price, prev_year price is correlated with the same htings (no surprise)
+
+# Ok, so let's take a look at floor_area_sqm (next most different predictor)
+# Besides flat_type which it's strongly corrlated with (r=0.93), 
+# it's also pretty correlated with lease_commence_date (r=0.50) and distance (r=0.31)
+
+# All this is very insightful! Ok... so we can kinda group them into two main predictors
+# History : historical housing price (short-term and long-term), and time
+# Quality of the house: size, location, age of house
+
+# So.. let's do a regular linear regression with the predictors that we have 
+# This will give us some predictive power, but my guess is that because each predictor has a lot of redundant
+# information, it's not gonna be as great as a PCA
+# Second model will use PCA for these two classes of predictors to extract the dimesnions of maximal variance
+
+
+# Ok..how about now we fix each predictor, then try to add the second predictor and see which gives s the best R2
+# And then keep going
+best_predictors=[];
+leftover_predictors=all_predictors[reverse_sort]
+# Remove ordinals that were not that informative anyway
+leftover_predictors=np.delete(leftover_predictors,np.where(leftover_predictors=='flatType_ordinal'))
+leftover_predictors=np.delete(leftover_predictors,np.where(leftover_predictors=='storeys_ordinal'))
+lr_predictors=[]
+lr_predictors.append(leftover_predictors[0])
+best_R2=[];
+best_R2.append(all_R2[reverse_sort[0]])
+
+# Start off with our first predictor, which we know is prevmonth_price
+# drop the first year
+# Don't include the first year since we won't have measurements for previous month + year
+idx=data.loc[:,'resale_year']==1990
+data1=data.loc[~idx,:]
+#data1=data1.dropna(axis=0) # Loose a lot of data lke this...
+# Impute instead
+#from sklearn.impute import SimpleImputer
+
+#data1=imp.fit_transform(data1)
+x1=data1.loc[:,all_predictors[reverse_sort[0]]]
+leftover_predictors=np.delete(leftover_predictors,np.where(leftover_predictors==all_predictors[reverse_sort[0]]))
+y=data1.resale_price;
+old_value=all_predictors[reverse_sort[0]]
+while leftover_predictors.size>0: # While we still have predictors
+    temp_r2=[] # Keep track of score of combining with all the other predictors
+    for count,value in enumerate(leftover_predictors):
+        #this_predictor=leftover_predictors[0]
+        if value in categorical_predictors:
+            x2=pd.get_dummies(data1.loc[:,value]) # Use dummy variables
+        else:
+            x2=data1.loc[:,value]
+            x2=x2.fillna(value=x2.mean())
+
+        #imp=SimpleImputer(strategy='mean')
+        X=pd.concat([x1,x2],axis=1)
+        X=X.fillna(value=X.mean())
+
+        
+        # We will split our data into 3 groups:
+        # 1. Training set, validation set (to select best parameters of model), & testing set
+        # Split into 60:20:20
+        X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+            # We have training set
+        X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+
+        # Choose best alpha ...
+        ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+        # Now train on validating data and get the appropriate alpha
+        ridgeCV_model.fit(X_validate, y_validate)
+        # Ok, now fit the model on training data with the selected alpha
+        #simpleLM=Ridge(alpha=0.0000000001, fit_intercept=True); # Debug
+        simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+        simpleLM.fit(X_train,y_train)                  
+    
+        # Now cross-validate
+        #y_pred = simpleLM.predict(X_xtest.reshape(-1,1))
+        #lm_mse=mean_squared_error(y_pred,y_xtest)
+        this_r2=simpleLM.score(X_xtest, y_xtest)
+        
+        #print('\nPredictor: ',value,'+',old_value)
+        #print('\nR squared: %.4f' % temp_r2)
+        # Save data
+        temp_r2.append(this_r2)
+    
+    # Ok, which was the best predictor?
+    temp_r2=np.array(temp_r2)
+    tempi=temp_r2.argmax()
+    temp_maxR2=temp_r2.max()
+    
+    # Update values
+    best_R2.append(temp_r2[tempi])
+    lr_predictors.append(leftover_predictors[tempi])
+    x1=X
+    leftover_predictors=np.delete(leftover_predictors,np.where(leftover_predictors==leftover_predictors[tempi]))
+    print('Getting best %dth predictor' % count)
+
+#
+## Ok, how about we use PCA regression to try and extract the independent information from the two dimensions 
+## We came up with - "history" and "house quality"
+#from sklearn.preprocessing import StandardScaler
+#
+#history_predictor=['prevmonth_price','prevyear_price','resale_year','CPI']
+#quality_predictor=['floor_area_sqm','flatType_ordinal','lease_commence_date','distanceOverfloor_area'] #PCA, we can't use categorical predictors
+#
+#history_x=data1.loc[:,history_predictor].values
+#quality_x=data1.loc[:,quality_predictor].values
+#
+#history_x=history_x.fillna(history_x.mean())
+#quality_x=history_x.fillna(quality_x.mean())
+#
+#y=data1.loc[:,'resale_price'].values
+#
+## Standardise features
+#history_x=StandardScaler().fit_transform(history_x)
+#quality_x=StandardScaler().fit_transform(quality_x)
+#
+#from sklearn.decomposition import PCA
+#
+#history_pca_model=PCA()
+#quality_pca_model=PCA()
+#history_pca=history_pca_model.fit_transform(history_x)
+#quality_pca=quality_pca_model.fit_transform(quality_x)
+#
+## Now do linear regression on these predictors instead?
+#X_train, X_xtest, y_train, y_xtest = train_test_split(history_pca, y, test_size=0.2)
+#basicLM=LinearRegression()
+#
+## Now train on PCA
+#basicLM.fit(X_train,y_train)                  
+#
+## Now cross-validate
+##y_pred = simpleLM.predict(X_xtest.reshape(-1,1))
+##lm_mse=mean_squared_error(y_pred,y_xtest)
+#temp_r2=basicLM.score(X_xtest, y_xtest)
+#print('\nHistory PCA Predictor: ')
+#print('\nR squared: %.4f' % temp_r2)
+
+#
+## Do again for quality x
+#X_train, X_xtest, y_train, y_xtest = train_test_split(quality_pca, y, test_size=0.2)
+#basicLM=LinearRegression()
+#
+## Now train on PCA
+#basicLM.fit(X_train, y_train)
+#
+#basicLM.fit(X_train,y_train)                  
+#
+## Now cross-validate
+##y_pred = simpleLM.predict(X_xtest.reshape(-1,1))
+##lm_mse=mean_squared_error(y_pred,y_xtest)
+#temp_r2=basicLM.score(X_xtest, y_xtest)
+#print('\nQuality PCA Predictor: ')
+#print('\nR squared: %.4f' % temp_r2)
+
+# Well...that didn't really do much! So let's just do regular linear regression with those three variables 
+best_predictors=lr_predictors[0:3] 
+# Plot how much each predictor contributes
+delta_R2=[best_R2[0]]+list(np.diff(best_R2[0:3]))
+# Plot the R2
+plt.figure(figsize=(5,12))
+ax=plt.subplot()
+plt.bar('All',best_R2[3],color='indigo')
+plt.bar(['Short-term price history','flat type', 'flat size'],delta_R2,color='blueviolet')
+#plt.bar(best_predictors,delta_R2,color='blueviolet')
+plt.xticks(fontsize=16,rotation=90)
+plt.yticks(fontsize=16)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+plt.ylabel('Predictive power (R2)',fontsize=20)
+plt.gcf().subplots_adjust(left=0.2,bottom=0.5)
+plt.show()
+    
+# And see how predictive power changes with time
+unique_resaleyear=data1.resale_year.unique()
+unique_resaleyear.sort()
+
+R2_by_year=[]
+
+for count,value in enumerate(unique_resaleyear):
+    idx=data1.loc[:,'resale_year']==value
+    y=data1.loc[idx,'resale_price']
+    
+    x1=data1.loc[idx,best_predictors[0]]
+    x1=x1.fillna(x1.mean())
+    x2=pd.get_dummies(data1.loc[idx,best_predictors[1]])
+    x2=x2.fillna(x1.mean())
+    x3=data1.loc[idx,best_predictors[2]]
+    x3=x3.fillna(x1.mean())
+    
+    X=pd.concat([x1,x2,x3],axis=1)
+    
+    
+    # Split into 60:20:20
+    X_train, X_test_all, y_train, y_test_all = train_test_split(X, y, test_size=0.4)
+        # We have training set
+    X_xtest, X_validate, y_xtest, y_validate = train_test_split(X_test_all, y_test_all, test_size=0.5)
+    
+    # Choose best alpha ...
+    ridgeCV_model=RidgeCV(alphas=alpha_vals,fit_intercept=True)
+    # Now train on validating data and get the appropriate alpha
+    ridgeCV_model.fit(X_validate, y_validate)
+    # Ok, now fit the model on training data with the selected alpha
+    simpleLM=Ridge(alpha=ridgeCV_model.alpha_, fit_intercept=True);
+
+    # # This code if you wanted to use lasso instead..gave similar results, which was expected
+    # lassoCV_model=LassoCV(alphas=alpha_vals,fit_intercept=True)
+    # lassoCV_model.fit(X_validate,y_validate)
+    # simpleLM=Lasso(alpha=lassoCV_model.alpha_, fit_intercept=True, max_iter=10000);
+    
+    simpleLM.fit(X_train,y_train)                  
+
+    # Now cross-validate
+    temp_r2=simpleLM.score(X_xtest, y_xtest)
+    print('\nPredictor year: ',value)
+    print('\nR squared: %.4f' % temp_r2)
+    
+    R2_by_year.append(temp_r2)
+
+
+# Plot results
+plt.figure(figsize=(12,6))
+ax=plt.subplot()
+plt.bar(unique_resaleyear,R2_by_year,color='indigo')
+plt.ylim([0,1])
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,1)
+plt.gcf().subplots_adjust(bottom=0.4) # To make sure you can read labels 
+plt.title('Explainable variance using optimal # of predictors')
+plt.show()

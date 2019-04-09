@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Apr  8 23:43:23 2019
+
+@author: Selina S. Solomon
+"""
+
+# Program to read in data and output the longitude and latitude of the location of the flats
+# Geocodes from OneMap api
+
+# Import relevant modules
+import os
+import requests 
+import numpy as np
+import pandas as pd
+
+# Set directories, filenames and url api
+curr_dir = os.getcwd()
+dataFolder=os.path.join(curr_dir,'DATA','resale-flat-prices') 
+    # This is where I saved the individual .csv files
+inputFileName='All_Resale_FlatPrices.csv'
+outputFileName='All_Resale_FlatPrices_wGeoCodes.csv'
+    # This is my output filename with merged data
+input_file=os.path.join(dataFolder,inputFileName)
+output_filename=os.path.join(dataFolder,outputFileName)
+url = 'https://developers.onemap.sg/commonapi/search?' # Onemap Singapore, as recommended
+# url = 'https://maps.googleapis.com/maps/api/geocode/json'
+    # Using googlemaps - tried to use onemaps but it's not very accurate wrt blk #
+
+# Read in data
+cleaned_data=pd.read_csv(input_file)
+
+# Get the unique searches you want to do
+unique_streetname=list(cleaned_data['street_name'].unique());
+# Now get the corresponding unique towns, because sometimes address search will fail
+unique_town=len(unique_streetname)*[None]
+for ss in range(len(unique_streetname)):
+    tempi=np.where(cleaned_data['street_name']==unique_streetname[ss])
+    tempi=tempi[0] # Get the first index
+    unique_town[ss]=list(cleaned_data['town'][tempi]);
+
+# Get corresponding geocodes now
+unique_lat=len(unique_streetname)*[None]
+unique_long=len(unique_streetname)*[None]
+for ss in range(len(unique_streetname)):
+    print('Doing iteration ',ss,'of ',len(unique_streetname))
+    thisStreetname=unique_streetname[ss]
+    thisTown=unique_town[ss][0]
+        # This is the address we want to search
+    params = {'searchVal': thisStreetname, 'returnGeom': 'Y','getAddrDetails':'Y','pageNum':1}
+        # Search just the streetname, because the block number doesn't seem to do well
+        # Just get closest value on the first page, and use that long/lat values
+    
+#    r = requests.get(url, params=params) # Ping the site
+    try:
+        r = requests.get(url, params=params) # Ping the site
+    except: # Sometimes it will time out, try again
+        r = requests.get(url, params=params) # Ping the site
+    
+    results = r.json()['results'] 
+    
+    # Could not find address...
+    if len(results)==0: # Could not find an address..like Jalan Pasar Baru in Geylang!
+        # Just use the town instead
+        params = {'searchVal': thisTown, 'returnGeom': 'Y','getAddrDetails':'Y','pageNum':1}
+        # Search just the streetname, because the block number doesn't seem to do well
+        # Just get closest value on the first page, and use that long/lat values
+        
+        try:
+            r = requests.get(url, params=params) # Ping the site
+        except: # Timed out, try again
+            r = requests.get(url, params=params) # Ping the site
+        results = r.json()['results']
+    
+    # Now fill in values
+    unique_lat[ss]=results[0]['LATITUDE']
+    unique_long[ss]=results[0]['LONGITUDE']
+  
+     
+# Now fill in corresponding values into dataframe
+latitude=len(cleaned_data)*[None]
+latitude=np.array(latitude) # Make it an array
+longitude=len(cleaned_data)*[None]
+longitude=np.array(longitude)
+for ss in range(len(unique_streetname)):
+    tempi=np.where(cleaned_data['street_name']==unique_streetname[ss])
+    latitude[tempi]=unique_lat[ss]
+    longitude[tempi]=unique_long[ss]
+
+# Append this info to cleaned data
+cleaned_data['latitude']=latitude;
+cleaned_data['longitude']=longitude;
+
+# Write to file
+cleaned_data.to_csv(output_filename,index=False)
+     

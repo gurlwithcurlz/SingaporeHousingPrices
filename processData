@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Apr  7 15:31:00 2019
+
+@author: Selina S. Solomon
+"""
+
+# Program to save processed data for analysis of HDB resale prices
+# Import relevant modules
+import os
+import numpy as np
+import pandas as pd
+# Plotting
+import matplotlib.pyplot as plt
+#from mpldatacursor import datacursor
+# Model fitting
+import statsmodels.api as stats
+from sklearn import datasets, linear_model
+from sklearn.metrics import mean_squared_error, r2_score
+
+
+
+# Set directories, filenames and url api
+curr_dir = os.getcwd()
+dataFolder=os.path.join(curr_dir) 
+    # This is where I saved the individual .csv files
+inputFileName='All_Resale_FlatPrices_wGeoCodes.csv'
+cpiFileName='CPI.csv'
+    # This is my filename with merged data and geodata
+input_file=os.path.join(dataFolder,inputFileName)
+
+# Read in data
+data=pd.read_csv(input_file)
+cpi_data=pd.read_csv(cpiFileName,na_values='na')
+#data=data.dropna(axis=0) # Drop rows with missing values..?
+
+# Add cpi data to predictor
+unique_cpi_months=np.array(cpi_data.month.unique())
+unique_data_months=np.array(data.month.unique())
+tempi=np.isin(unique_data_months,unique_cpi_months,assume_unique=True)
+unique_months=unique_data_months[tempi]
+
+#temp_cpi=unique
+for count,value in enumerate(unique_months):
+    idx=data.loc[:,'month']==value
+    idx2=(cpi_data[cpi_data.month==value].index) & (cpi_data[cpi_data.level_1=='All Items'].index)
+    #idx2=(cpi_data.loc[:,'month']==value) & (cpi_data.loc[:,'level_1']=='All Items')
+    cpi_val=cpi_data.loc[idx2,'value'].values[0] # Stupid indexing python makes you make for a single variable...
+    #cpi_val=cpi_data.loc[idx2,'value']
+    #tempval=len(idx)*[None]
+    #tempval.loc[idx]=cpi_val
+    data.loc[idx,'CPI']=cpi_val
+    print('Getting CPI data for',value)
+
+# Add # of houses for sale into market into predictor
+n_houses_for_sale=data.groupby('month').resale_price.count()
+
+for count,value in enumerate(n_houses_for_sale):
+    idx=data.loc[:,'month']==n_houses_for_sale.index[count] # The index is the month
+    data.loc[idx,'n_houses_for_sale']=value
+    print('Getting # houses for sale data for',n_houses_for_sale.index[count])
+
+    
+
+# Ok, now let's get the potential predictors and evaluate which ones we should use as predictors
+all_predictors=data.columns.unique();
+
+# Let's first see how these variables do on their own
+# Following are predictors:
+#Index(['block', 'flat_model', 'flat_type', 'floor_area_sqm',
+#       'lease_commence_date', 'month', 'remaining_lease', 'resale_price',
+#       'storey_range', 'street_name', 'town', 'latitude','longitutde','resale_year', 'resale_month','CPI','n_houses_for_sale'],
+#      dtype='object')
+
+# Ok..apt block # is probably not super informative... let's ignore that
+
+# Flat model... found some info from https://sg.finance.yahoo.com/news/different-types-hdb-houses-call-020000642.html
+# There's some relationship to floor area
+# Probably leave this as a categorical variable
+
+
+# Ok, found some info about flat types on www.hdb.gov.sg
+# Note: This variable is correlated with floor area
+# We can assign ordinals to this predictor
+unique_flatTypes=['1 ROOM','2 ROOM','3 ROOM','4 ROOM','5 ROOM', 'MULTI GENERATION','EXECUTIVE']
+flatType_ordinal=range(1,8) # 7 ordinals
+# Now append a column with the ordinals
+for count,value in enumerate(unique_flatTypes):
+    idx=(data.loc[:,'flat_type']==value)
+    data.loc[idx,'flatType_ordinal']=flatType_ordinal[count]
+
+# floor_area_sqm is self-explanatory, leave as a quantity
+
+# lease_commence_date is the year the hdb apartment was built - leave as quantity, proxy for age
+
+# month is month and year of resale
+# this might be quite important for short-term and long-term autorgressions
+    # So let's split into year and month (but keep original data too)
+# Convert month-year data into year and month
+data['resale_year']=data['month'].replace('-..','',regex=True)
+data['resale_year']=data['resale_year'].astype(int)
+data['resale_month']=data.month.replace(to_replace='....-',value='',regex=True)# Convert yyyy-mm format into numerical month
+data['resale_month']=data['resale_month'].astype(int) # Maybe there are cyclical effects in the year? Who knows...
+#
+#
+    
+# Remaining lease tells us how much time is left on the lease...this would be coresponding to when the apartment was sold
+# Is a proxy of age, will be perfectly correlated with lease commence date.. furthermore, a lot of entires missing this data
+# So,don't use this predictor
+
+# storey_range.. this data isn't partitioned into non-overlapping bins...
+# can also probably combine bins, we don't need such high resolution (1-3 storeys...)
+# Bin into 1-10, 11-20, 21-30, 31-40, 41-50
+# Make into ordinal
+storeys_ordinal=range(1,6) # 5 ordinals
+# Now append a column with the ordinals
+start_val=10 # Storey counting start
+tempval=data.storey_range.replace(to_replace='......',value='',regex=True)
+tempval=tempval.astype(int) # Convert to integer
+for count,value in enumerate(storeys_ordinal):
+    idx=(tempval<=start_val) & (tempval>(start_val-10))
+    data.loc[idx,'storeys_ordinal']=value
+    start_val+=10
+    
+# Streetname...  dont need to use this as a predictor
+# We have geocodes..so we can estimate distance from central area
+# Using haverside formula
+#    a = sin²(Δφ/2) + cos φ1 ⋅ cos φ2 ⋅ sin²(Δλ/2)
+#   c = 2 ⋅ atan2( √a, √(1−a) )
+#   d = R ⋅ c
+
+# Town can leave as a categorical predictor
+  
+# Latitude and longitude
+# We have geocodes..so we can estimate distance from central area
+# Using haverside formula (assumes constant altitude, reasonable assumption for Sg...)
+#    a = sin²(Δφ/2) + cos φ1 ⋅ cos φ2 ⋅ sin²(Δλ/2)
+#   c = 2 ⋅ atan2( √a, √(1−a) )
+#   d = R ⋅ c
+#   R = radius of earth, 6371 km
+# Must convert latitude and longitude to radian  
+data['latitude_rad']=np.deg2rad(data.latitude)   
+data['longitude_rad']=np.deg2rad (data.longitude)
+#idx=data.loc[:,'town']=='CENTRAL AREA';
+## Now convert polar coordinates into cartesian coordinates
+#tempx=6371*np.cos(data.latitude_rad)*np.cos(data.longitude_rad)
+#tempy=6371*np.cos(data.latitude_rad)*np.sin(data.longitude_rad)
+#tempz=6371*np.sin(data.latitude_rad)
+## Measure midpoint as centroid
+#avgx=np.mean(tempx)
+#avgy=np.mean(tempy)
+#avgz=np.mean(tempz)
+## Convert back to latitude and longitude
+#central_long=np.arctan2(avgy,avgx)
+#hyp=np.sqrt((avgx*avgx)+(avgy*avgy))
+#central_lat=np.arctan2(avgz,hyp)
+central_lat=np.deg2rad(1.287953)
+central_long=np.deg2rad(103.851784)
+# Now measure distance between each point and this average 'central area' using Haverside formula
+temp_deltaLat=np.array(data.latitude_rad-central_lat)
+temp_deltaLat=temp_deltaLat.reshape(-1,1)
+temp_deltaLong=np.array(data.longitude_rad-central_long)
+temp_deltaLong=temp_deltaLong.reshape(-1,1)
+# Start with a formula
+tempval1=np.sin(temp_deltaLat/2)**2
+tempval2=np.cos(data.latitude_rad)*np.cos(central_lat)
+tempval2=np.array(tempval2)
+tempval2=tempval2.reshape(-1,1)
+tempval3=np.sin(temp_deltaLong/2)**2
+a=tempval1+tempval2*tempval3
+tempval1=np.sqrt(a)
+tempval2=np.sqrt(1-a)
+c=2*np.arctan2(tempval1,tempval2)
+data['distance_from_CentralArea']=6371*c
+
+# One issue with distance from central area is that it is correlated with size & lease_commence data, which are 
+# oppositely related to price (as distance goes up, price goes down but as distance goes up, size goes up and the bigger
+# the size, the higher the price)
+# So... let's create some ratio of these correlated variables
+data['distanceOverfloor_area']=data.distance_from_CentralArea/(data.floor_area_sqm)
+data['distanceOverlease_commence_date']=data.distance_from_CentralArea/(data.lease_commence_date)
+    
+# Resale year and resale month...use this for long-term and short-term autocorrelation...
+temp_resaleprice=data.groupby('resale_year').resale_price.mean()
+unique_resaleyear=data.resale_year.unique()
+unique_resaleyear.sort()
+for count,value in enumerate(unique_resaleyear):
+    if count==0:
+        continue
+    else:
+        prev_price=temp_resaleprice[value-1] # Previous year price
+        idx=data.resale_year==value # All data points in this year
+        data.loc[idx,'prevyear_price']=prev_price
+
+# Do similar thing for last month (short-term auto-corrleation)
+# But this is a little complicated...
+temp_resaleprice=data.groupby('month').resale_price.mean()
+unique_resalemonth=data.month.unique()
+unique_resalemonth.sort()
+for count,value in enumerate(unique_resalemonth):
+    if count==0: # January
+        continue
+    else:
+        idx=unique_resalemonth[count-1] # Previous year index
+        prev_price=temp_resaleprice.loc[idx] # Previous month price
+        idx=data.month==value # All data points in this year
+        data.loc[idx,'prevmonth_price']=prev_price
+        
+## Now save data
+
+outputFileName='All_Resale_FlatPrices_Processed.csv'
+output_file=os.path.join(dataFolder,outputFileName)
+
+# Read in data
+data.to_csv(outputFileName,index=False) # Don't include index #
+        

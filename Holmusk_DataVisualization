@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Apr  1 22:40:56 2019
+
+@author: Selina S. Solomon
+"""
+# Selina 1 April 2019
+# Program to do some basic visualization to have an idea of how housing prices are varying 
+
+# Import relevant modules
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from mpldatacursor import datacursor
+
+# Set directories, filenames and url api
+curr_dir = os.getcwd()
+dataFolder=os.path.join(curr_dir) 
+    # This is where I saved the individual .csv files
+inputFileName='All_Resale_FlatPrices_Processed.csv'
+input_file=os.path.join(dataFolder,inputFileName)
+
+all_predictors=np.array(['prevmonth_price','floor_area_sqm','flat_type','town' ])
+categorical_predictors=np.array(['flat_type','town'])
+quantitative_predictors=np.array(['prevmonth_price','floor_area_sqm'])
+
+# Read in data
+data=pd.read_csv(input_file)
+
+# Plot resale price as a function of year
+plotval=data.groupby('resale_year').resale_price.mean()
+ploterr=data.groupby('resale_year').resale_price.std()
+#xval=data.groupby('resale_year').index
+plt.figure(figsize=(12,8))
+ax=plt.subplot()
+plt.plot(plotval.index,plotval,color='indigo')
+ax.fill_between(plotval.index,plotval-ploterr,plotval+ploterr,facecolor='indigo',alpha=0.5)
+figfont={'fontname':'Arial'}
+plt.ylabel('Resale price ($)',fontsize=20,**figfont)
+plt.xlabel('Year',fontsize=20)
+plt.ylim([0,700000])
+plt.xlim([1988,2020])
+plt.xticks(ticks=range(1990,2020,5),fontsize=15)
+plt.yticks(fontsize=15)
+#plt.axis('square')
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,700000)
+ax.spines['bottom'].set_bounds(1990,2020)
+plt.show()
+
+# Plot resale price as a function of flat type
+grouped_val=data.groupby(['flat_type','resale_year']).flat_type
+#grouped_mean=
+#grouped_n=grouped_val.flat_type.count()
+#grouped_err=data.groupby('resale_year').sem()
+
+grouped_mean=data.groupby('resale_year').flat_type
+grouped_n=data.groupby('resale_year')
+grouped_err=data.groupby('resale_year')
+#plt.figure(figsize=(12,6)) groupplot creates its own figure
+ax=plt.subplot()
+grouped_val.count().unstack(0).plot()
+figfont={'fontname':'Arial'}
+plt.ylabel('Resale price',fontsize=20,**figfont)
+plt.xlabel('Year',fontsize=20)
+#plt.ylim([0,700000])
+#plt.axis('square')
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,200000)
+ax.spines['bottom'].set_bounds(1990,2018)
+#plt.grid(True)
+#datacursor(ax)
+plt.show()
+
+# Plot resale price as afunction of distance from city centre
+data['latitude_rad']=np.deg2rad(data.latitude)   
+data['longitude_rad']=np.deg2rad (data.longitude)
+central_lat=np.deg2rad(1.287953)
+central_long=np.deg2rad(103.851784)
+# Now measure distance between each point and this average 'central area' using Haverside formula
+temp_deltaLat=np.array(data.latitude_rad-central_lat)
+temp_deltaLat=temp_deltaLat.reshape(-1,1)
+temp_deltaLong=np.array(data.longitude_rad-central_long)
+temp_deltaLong=temp_deltaLong.reshape(-1,1)
+# Start with a formula
+tempval1=np.sin(temp_deltaLat/2)**2
+tempval2=np.cos(data.latitude_rad)*np.cos(central_lat)
+tempval2=np.array(tempval2)
+tempval2=tempval2.reshape(-1,1)
+tempval3=np.sin(temp_deltaLong/2)**2
+a=tempval1+tempval2*tempval3
+tempval1=np.sqrt(a)
+tempval2=np.sqrt(1-a)
+c=2*np.arctan2(tempval1,tempval2)
+data['distance_from_CentralArea']=6371*c
+
+distance=range(2,24,2)
+grouped_mean=[]
+grouped_n=[]
+grouped_err=[]
+for count,value in enumerate(distance):
+    if count==0:
+        idx=data.distance_from_CentralArea<value
+    else:
+        idx=(data.distance_from_CentralArea<value) & (data.distance_from_CentralArea>=distance[count-1])
+    grouped_mean.append(data.loc[idx,'resale_price'].mean())
+    grouped_n.append(data.loc[idx,'resale_price'].count())
+    grouped_err.append(data.loc[idx,'resale_price'].std())
+# Convert to array
+grouped_mean=np.array(grouped_mean)
+grouped_err=np.array(grouped_err)
+plt.figure(figsize=(12,6))
+ax=plt.subplot()
+ax.fill_between(distance,grouped_mean-grouped_err,grouped_mean+grouped_err,facecolor='indigo',alpha=0.5)
+ax.plot(distance,grouped_mean,color='indigo')
+#h=plt.errorbar(x=distance,y=grouped_mean,yerr=grouped_err,color='indigo',capsize=0)
+figfont={'fontname':'Arial'}
+plt.ylabel('Resale price ($)',fontsize=20,**figfont)
+plt.xlabel('Distance for city centre',fontsize=20)
+plt.ylim([0,700000])
+plt.xlim([0,22.5])
+plt.xticks([2.5,5,7.5,10,12.5,15,17.5,20],fontsize=15)
+plt.yticks(fontsize=15)
+plt.axis('square')
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,700000)
+ax.spines['bottom'].set_bounds(2.5,20)
+plt.gcf().subplots_adjust(left=0.2,bottom=0.2)
+#plt.grid(True)
+#datacursor(ax)
+plt.show()
+
+# Plot resale price as a function of size
+size=range(20,350,50)
+grouped_mean=[]
+grouped_n=[]
+grouped_err=[]
+for count,value in enumerate(size):
+    if count==0:
+        idx=data.floor_area_sqm<value
+    else:
+        idx=(data.floor_area_sqm<value) & (data.floor_area_sqm>=size[count-1])
+    grouped_mean.append(data.loc[idx,'resale_price'].mean())
+    grouped_n.append(data.loc[idx,'resale_price'].count())
+    grouped_err.append(data.loc[idx,'resale_price'].std())
+    
+# Convert to array
+grouped_mean=np.array(grouped_mean)
+grouped_err=np.array(grouped_err)
+plt.figure(figsize=(12,6))
+ax=plt.subplot()
+ax.fill_between(size,grouped_mean-grouped_err,grouped_mean+grouped_err,facecolor='indigo',alpha=0.5)
+#plt.hold(ax)
+ax.plot(size,grouped_mean,color='indigo')
+#ax.errorbar(x=size,y=grouped_mean,yerr=grouped_err,color='indigo',capsize=0)
+figfont={'fontname':'Arial'}
+plt.ylabel('Resale price ($)',fontsize=20,**figfont)
+plt.xlabel('Floor area (sqm)',fontsize=20)
+plt.ylim([0,900000])
+plt.xlim([50,400])
+plt.xticks(range(100,400,100),fontsize=15)
+plt.yticks(fontsize=15)
+#plt.axis('square')
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,900000)
+ax.spines['bottom'].set_bounds(100,300)
+#plt.grid(True)
+#datacursor(ax)
+plt.gcf().subplots_adjust(left=0.2) # To make sure you can read labels 
+plt.show()
+
+## Plot distance as a function of size
+
+grouped_mean=[]
+grouped_n=[]
+grouped_err=[]
+distance=[2.5,5,7.5,10,12.5,15,17.5,20,22.5,25]
+for count,value in enumerate(distance):
+    if count==0:
+        idx=data.distance_from_CentralArea<value
+    else:
+        idx=(data.distance_from_CentralArea<value) & (data.distance_from_CentralArea>=distance[count-1])
+    grouped_mean.append(data.loc[idx,'floor_area_sqm'].mean())
+    grouped_n.append(data.loc[idx,'floor_area_sqm'].count())
+    grouped_err.append(data.loc[idx,'floor_area_sqm'].std())
+    
+# Convert to array
+grouped_mean=np.array(grouped_mean)
+grouped_err=np.array(grouped_err)
+plt.figure(figsize=(12,8))
+ax=plt.subplot()
+ax.fill_between(distance,grouped_mean-grouped_err,grouped_mean+grouped_err,facecolor='indigo',alpha=0.5)
+#plt.hold(ax)
+ax.plot(distance,grouped_mean,color='indigo')
+#ax.errorbar(x=size,y=grouped_mean,yerr=grouped_err,color='indigo',capsize=0)
+figfont={'fontname':'Arial'}
+plt.xlabel('Distance (km)',fontsize=20,**figfont)
+plt.ylabel('Floor area (sqm)',fontsize=20)
+plt.ylim([40,140])
+plt.xlim([0,25])
+plt.yticks(fontsize=15)
+plt.xticks(range(5,25,5),fontsize=15)
+#plt.axis('square')
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(40,140)
+ax.spines['bottom'].set_bounds(2.5,22.5)
+#plt.grid(False)
+#datacursor(ax)
+plt.show()
+
+grouped_mean=[]
+grouped_n=[]
+grouped_err=[]
+distance_normed=[0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]
+for count,value in enumerate(distance_normed):
+    if count==0:
+        idx=data.distanceOverfloor_area<value
+    else:
+        idx=(data.distanceOverfloor_area<value) & (data.distanceOverfloor_area>=distance_normed[count-1])
+    grouped_mean.append(data.loc[idx,'resale_price'].mean())
+    grouped_n.append(data.loc[idx,'resale_price'].count())
+    grouped_err.append(data.loc[idx,'resale_price'].std())
+    
+# Convert to array
+grouped_mean=np.array(grouped_mean)
+grouped_err=np.array(grouped_err)
+plt.figure(figsize=(10,6))
+ax=plt.subplot()
+ax.fill_between(distance_normed,grouped_mean-grouped_err,grouped_mean+grouped_err,facecolor='indigo',alpha=0.5)
+#plt.hold(ax)
+ax.plot(distance_normed,grouped_mean,color='indigo')
+#ax.errorbar(x=size,y=grouped_mean,yerr=grouped_err,color='indigo',capsize=0)
+figfont={'fontname':'Arial'}
+plt.xlabel('Resale price ($)',fontsize=20,**figfont)
+plt.ylabel('Distance/floor area (km/sqm)',fontsize=20)
+plt.ylim([0,600000])
+plt.xlim([0,0.5])
+plt.yticks(fontsize=15)
+plt.xticks(fontsize=15)
+#plt.axis('square')
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.spines['left'].set_bounds(0,600000)
+ax.spines['bottom'].set_bounds(0.05,0.5)
+plt.gcf().subplots_adjust(left=0.2,bottom=0.2)
+#plt.grid(False)
+#datacursor(ax)
+plt.show()
